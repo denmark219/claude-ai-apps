@@ -71,8 +71,8 @@
   </div>
   <div class="row">
     <label for="sens">Sensitivity</label>
-    <input type="range" id="sens" min="1" max="20" step="1" value="8">
-    <span id="sens-out">8</span>
+    <input type="range" id="sens" min="1" max="100" step="1" value="15">
+    <span id="sens-out">15</span>
   </div>
 
   <button class="big-btn" id="listenBtn" onclick="toggleListen()">Start listening</button>
@@ -294,13 +294,15 @@ function loop() {
   ekgBuf = display; ekgWritePos = 0;
   drawEkg();
 
-  const threshold = parseFloat(sensSlider.value) / 1000;
+  const sensVal = parseFloat(sensSlider.value);
+  const threshold = (101 - sensVal) / 2000;
+  const spikeRatio = sensVal > 50 ? 1.5 : 2.5;
   const now = performance.now();
-  if (rms > threshold && prevRms <= threshold && (now - lastTickTime) > 200) {
+  if (rms > threshold && rms > prevRms * spikeRatio && (now - lastTickTime) > 150) {
     lastTickTime = now;
     onTick(now);
   }
-  prevRms = rms;
+  prevRms = rms * 0.85 + prevRms * 0.15;
 }
 
 function onTick(now) {
