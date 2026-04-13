@@ -125,20 +125,46 @@
 let audioCtx, analyser, source, stream, animFrame;
 let listening = false;
 let taps = [], bpmHistory = [], bpmLabels = [];
-let lastTickTime = 0, avgRms = 0, peakRms = 0;
+let lastTickTime = 0, avgRms = 0;
 let tickTockMode = false;
 let tickCount = 0;
+const ROLLING_WINDOW_MS = 10000; // use only taps from last 10 seconds for BPM
 
 const mingapSlider = document.getElementById('mingap');
 const mingapOut = document.getElementById('mingap-out');
 const modeBtn = document.getElementById('modeBtn');
-mingapSlider.addEventListener('input', () => { mingapOut.textContent = mingapSlider.value; });
+
+// ── Settings persistence ─────────────────────────────────────────────────────
+function saveSettings() {
+  try {
+    localStorage.setItem('pendulum_settings', JSON.stringify({
+      target: targetSlider.value,
+      sens:   sensSlider.value,
+      mingap: mingapSlider.value,
+      mode:   tickTockMode
+    }));
+  } catch(e) {} // private browsing — silently ignore
+}
+
+function loadSettings() {
+  try {
+    const s = JSON.parse(localStorage.getItem('pendulum_settings') || 'null');
+    if (!s) return;
+    if (s.target) { targetSlider.value = s.target; tgtOut.textContent  = parseFloat(s.target).toFixed(1); }
+    if (s.sens)   { sensSlider.value   = s.sens;   sensOut.textContent = s.sens; }
+    if (s.mingap) { mingapSlider.value = s.mingap;  mingapOut.textContent = s.mingap; }
+    if (s.mode)   { tickTockMode = true; modeBtn.textContent = 'Every other (tick-tock)'; modeBtn.style.borderColor = '#1D9E75'; modeBtn.style.color = '#1D9E75'; }
+  } catch(e) {}
+}
+
+mingapSlider.addEventListener('input', () => { mingapOut.textContent = mingapSlider.value; saveSettings(); });
 
 function toggleMode() {
   tickTockMode = !tickTockMode;
   modeBtn.textContent = tickTockMode ? 'Every other (tick-tock)' : 'Every tick';
   modeBtn.style.borderColor = tickTockMode ? '#1D9E75' : '';
   modeBtn.style.color = tickTockMode ? '#1D9E75' : '';
+  saveSettings();
   resetAll();
 }
 const MIN_TAPS = 4, MAX_TAPS = 24;
@@ -162,6 +188,9 @@ let ekgBuf = new Float32Array(300).fill(0);
 let ekgWritePos = 0;
 
 const isDark = () => window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+// Load saved settings now that all DOM refs exist
+loadSettings();
 
 const bpmChart = new Chart(document.getElementById('bpmChart'), {
   type: 'line',
@@ -267,10 +296,11 @@ drawEkg();
 
 targetSlider.addEventListener('input', () => {
   tgtOut.textContent = parseFloat(targetSlider.value).toFixed(1);
+  saveSettings();
   if (taps.length >= MIN_TAPS) updateDisplay();
   updateTargetLine();
 });
-sensSlider.addEventListener('input', () => { sensOut.textContent = sensSlider.value; });
+sensSlider.addEventListener('input', () => { sensOut.textContent = sensSlider.value; saveSettings(); });
 
 function updateTargetLine() {
   const t = parseFloat(targetSlider.value);
@@ -362,7 +392,9 @@ function loop() {
 
 function onTick(now) {
   taps.push(now);
-  if (taps.length > MAX_TAPS) taps.shift();
+  // Prune taps older than the rolling window (keep one extra for interval calculation)
+  const cutoff = now - ROLLING_WINDOW_MS - 2000;
+  while (taps.length > 1 && taps[0] < cutoff) taps.shift();
 
   document.getElementById('tick-counter').textContent = tickCount;
 
@@ -375,14 +407,20 @@ function onTick(now) {
 
   if (taps.length >= MIN_TAPS) updateDisplay();
   else {
+    const needed = MIN_TAPS - taps.length;
     statusEl.className = 'status-bar s-listening';
-    statusEl.textContent = 'Detected ' + taps.length + ' ticks… (' + MIN_TAPS + ' needed)';
+    statusEl.textContent = 'Detected ' + taps.length + ' tick' + (taps.length !== 1 ? 's' : '') + '… (' + needed + ' more needed)';
   }
 }
 
 function updateDisplay() {
+  // Use only taps within the last ROLLING_WINDOW_MS for a current, stable average
+  const now = performance.now();
+  const recent = taps.filter(t => now - t <= ROLLING_WINDOW_MS);
+  if (recent.length < 2) return; // not enough data in window yet
+
   const intervals = [];
-  for (let i = 1; i < taps.length; i++) intervals.push(taps[i] - taps[i-1]);
+  for (let i = 1; i < recent.length; i++) intervals.push(recent[i] - recent[i-1]);
   const avg = intervals.reduce((a,b) => a+b,0) / intervals.length;
   const bpm = 60000 / avg;
   const target = parseFloat(targetSlider.value);
