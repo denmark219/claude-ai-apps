@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Pendulum Calibrator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #ffffff; --bg2: #f5f5f3; --bg3: #eeede8;
+    --text: #1a1a1a; --text2: #666; --text3: #999;
+    --border: rgba(0,0,0,0.12); --border2: rgba(0,0,0,0.22);
+    --success-bg: #e1f5ee; --success-text: #0f6e56;
+    --warn-bg: #faeeda; --warn-text: #854f0b;
+    --info-bg: #e6f1fb; --info-text: #185fa5;
+    --radius: 8px; --radius-lg: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1e1e1e; --bg2: #2a2a2a; --bg3: #333;
+      --text: #f0f0f0; --text2: #aaa; --text3: #666;
+      --border: rgba(255,255,255,0.1); --border2: rgba(255,255,255,0.22);
+      --success-bg: #085041; --success-text: #9fe1cb;
+      --warn-bg: #412402; --warn-text: #fac775;
+      --info-bg: #042c53; --info-text: #b5d4f4;
+    }
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+  h1 { font-size: 20px; font-weight: 500; margin-bottom: 1.5rem; color: var(--text); }
+  .section-label { font-size: 11px; color: var(--text3); letter-spacing: 0.06em; text-transform: uppercase; margin: 0 0 6px; }
+  .row { display: flex; align-items: center; gap: 10px; margin-bottom: 0.9rem; }
+  .row label { font-size: 13px; color: var(--text2); white-space: nowrap; min-width: 90px; }
+  .row input[type=range] { flex: 1; accent-color: #1D9E75; }
+  .row span { font-size: 13px; font-weight: 500; min-width: 40px; text-align: right; color: var(--text); }
+  .big-btn { width: 100%; padding: 1rem; font-size: 17px; font-weight: 500; background: var(--bg); border: 0.5px solid var(--border2); border-radius: var(--radius-lg); color: var(--text); cursor: pointer; margin-bottom: 1rem; -webkit-tap-highlight-color: transparent; touch-action: manipulation; transition: background 0.1s; }
+  .big-btn:active { background: var(--bg2); }
+  .big-btn.active { border-color: #1D9E75; color: #1D9E75; }
+  .reset-btn { display: block; width: 100%; padding: 0.55rem; font-size: 13px; background: transparent; border: 0.5px solid var(--border); border-radius: var(--radius); color: var(--text2); cursor: pointer; margin-top: 0.75rem; }
+  .status-bar { border-radius: var(--radius); padding: 0.7rem 1rem; font-size: 14px; font-weight: 500; text-align: center; margin-bottom: 1rem; }
+  .s-idle { background: var(--bg2); color: var(--text2); }
+  .s-listening { background: var(--success-bg); color: var(--success-text); }
+  .s-good { background: var(--success-bg); color: var(--success-text); }
+  .s-fast { background: var(--warn-bg); color: var(--warn-text); }
+  .s-slow { background: var(--info-bg); color: var(--info-text); }
+  canvas.ekg { display: block; width: 100%; height: 64px; border-radius: var(--radius); background: var(--bg2); }
+  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0 1rem; }
+  .panel { background: var(--bg2); border-radius: var(--radius); padding: 0.75rem; }
+  .panel-lbl { font-size: 11px; color: var(--text2); margin-bottom: 4px; }
+  .panel-val { font-size: 26px; font-weight: 500; color: var(--text); line-height: 1.1; }
+  .panel-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .history-dots { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border2); flex-shrink: 0; }
+  .dot.good { background: #1D9E75; }
+  .dot.fast { background: #BA7517; }
+  .dot.slow { background: #378ADD; }
+  .advice { font-size: 13px; color: var(--text2); text-align: center; line-height: 1.6; min-height: 2rem; margin-bottom: 0.5rem; }
+  .chart-wrap { position: relative; width: 100%; height: 130px; }
+  #dial { display: block; margin: 0 auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Pendulum calibrator</h1>
+
+  <div class="row">
+    <label for="target">Target BPM</label>
+    <input type="range" id="target" min="30" max="120" step="0.5" value="60">
+    <span id="tgt-out">60.0</span>
+  </div>
+  <div class="row">
+    <label for="sens">Sensitivity</label>
+    <input type="range" id="sens" min="1" max="20" step="1" value="8">
+    <span id="sens-out">8</span>
+  </div>
+
+  <button class="big-btn" id="listenBtn" onclick="toggleListen()">Start listening</button>
+  <div id="status" class="status-bar s-idle">Press start to begin</div>
+
+  <p class="section-label">Audio waveform</p>
+  <canvas class="ekg" id="ekg" aria-label="Live audio waveform"></canvas>
+
+  <div class="panels">
+    <div class="panel">
+      <p class="panel-lbl">Measured BPM</p>
+      <p class="panel-val" id="bpm-val">—</p>
+      <div class="history-dots" id="dots"></div>
+    </div>
+    <div class="panel" style="display:flex;flex-direction:column;align-items:center;justify-content:center;">
+      <p class="panel-lbl" style="align-self:flex-start;">Deviation</p>
+      <canvas id="dial" width="130" height="82" aria-label="Deviation gauge"></canvas>
+      <p class="panel-sub" id="dev-lbl">—</p>
+    </div>
+  </div>
+
+  <p class="section-label">BPM history</p>
+  <div class="chart-wrap">
+    <canvas id="bpmChart" aria-label="BPM history line chart"></canvas>
+  </div>
+
+  <div class="advice" id="advice"></div>
+  <button class="reset-btn" onclick="resetAll()">Reset measurements</button>
+</div>
+
+<script>
+let audioCtx, analyser, source, stream, animFrame;
+let listening = false;
+let taps = [], bpmHistory = [], bpmLabels = [];
+let lastTickTime = 0, prevRms = 0;
+const MIN_TAPS = 4, MAX_TAPS = 24;
+
+const ekgCanvas = document.getElementById('ekg');
+const ekgCtx = ekgCanvas.getContext('2d');
+const dialCanvas = document.getElementById('dial');
+const dialCtx = dialCanvas.getContext('2d');
+const listenBtn = document.getElementById('listenBtn');
+const statusEl = document.getElementById('status');
+const bpmEl = document.getElementById('bpm-val');
+const devLbl = document.getElementById('dev-lbl');
+const dotsEl = document.getElementById('dots');
+const adviceEl = document.getElementById('advice');
+const targetSlider = document.getElementById('target');
+const tgtOut = document.getElementById('tgt-out');
+const sensSlider = document.getElementById('sens');
+const sensOut = document.getElementById('sens-out');
+
+let ekgBuf = new Float32Array(300).fill(0);
+let ekgWritePos = 0;
+
+const isDark = () => window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+const bpmChart = new Chart(document.getElementById('bpmChart'), {
+  type: 'line',
+  data: {
+    labels: bpmLabels,
+    datasets: [
+      { data: bpmHistory, borderColor: '#1D9E75', borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#1D9E75', tension: 0.3, fill: false },
+      { data: [], borderColor: '#E24B4A', borderWidth: 1.5, borderDash: [4,3], pointRadius: 0, fill: false }
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ctx.parsed.y.toFixed(1) + ' BPM' } } },
+    scales: {
+      x: { ticks: { font: { size: 11 }, color: '#888', maxTicksLimit: 6 }, grid: { color: 'rgba(128,128,128,0.12)' } },
+      y: { ticks: { font: { size: 11 }, color: '#888', callback: v => v.toFixed(0) }, grid: { color: 'rgba(128,128,128,0.12)' } }
+    }
+  }
+});
+
+function drawDial(deviation) {
+  const W = dialCanvas.width, H = dialCanvas.height;
+  const cx = W / 2, cy = H - 10;
+  const R = Math.min(cx, cy) - 6;
+  dialCtx.clearRect(0, 0, W, H);
+  const trackColor = isDark() ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+  const textColor = isDark() ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.38)';
+
+  dialCtx.beginPath();
+  dialCtx.arc(cx, cy, R, Math.PI, 0);
+  dialCtx.strokeStyle = trackColor;
+  dialCtx.lineWidth = 8;
+  dialCtx.stroke();
+
+  const clamp = Math.max(-1, Math.min(1, deviation / 5));
+  const angle = Math.PI + clamp * (Math.PI / 2);
+  let needleColor = '#1D9E75';
+  if (Math.abs(deviation) >= 0.5 && Math.abs(deviation) < 2) needleColor = '#BA7517';
+  if (Math.abs(deviation) >= 2) needleColor = '#E24B4A';
+
+  dialCtx.beginPath();
+  dialCtx.arc(cx, cy, R, Math.PI, angle, deviation < 0);
+  dialCtx.strokeStyle = needleColor;
+  dialCtx.lineWidth = 8;
+  dialCtx.stroke();
+
+  const nx = cx + (R - 2) * Math.cos(angle);
+  const ny = cy + (R - 2) * Math.sin(angle);
+  dialCtx.beginPath();
+  dialCtx.moveTo(cx, cy);
+  dialCtx.lineTo(nx, ny);
+  dialCtx.strokeStyle = needleColor;
+  dialCtx.lineWidth = 2.5;
+  dialCtx.lineCap = 'round';
+  dialCtx.stroke();
+  dialCtx.beginPath();
+  dialCtx.arc(cx, cy, 4, 0, Math.PI * 2);
+  dialCtx.fillStyle = needleColor;
+  dialCtx.fill();
+
+  dialCtx.font = '10px -apple-system, sans-serif';
+  dialCtx.fillStyle = textColor;
+  dialCtx.textAlign = 'right';
+  dialCtx.fillText('slow', cx - R + 6, cy - 4);
+  dialCtx.textAlign = 'left';
+  dialCtx.fillText('fast', cx + R - 6, cy - 4);
+}
+
+function drawEkg() {
+  const W = ekgCanvas.offsetWidth || 400;
+  ekgCanvas.width = W * window.devicePixelRatio;
+  ekgCanvas.height = 64 * window.devicePixelRatio;
+  ekgCanvas.style.width = W + 'px';
+  ekgCanvas.style.height = '64px';
+  ekgCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  const H = 64;
+  ekgCtx.clearRect(0, 0, W, H);
+  ekgCtx.fillStyle = isDark() ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)';
+  ekgCtx.fillRect(0, 0, W, H);
+  ekgCtx.beginPath();
+  const step = W / ekgBuf.length;
+  for (let i = 0; i < ekgBuf.length; i++) {
+    const x = i * step;
+    const y = H / 2 - ekgBuf[i] * (H / 2 - 4);
+    i === 0 ? ekgCtx.moveTo(x, y) : ekgCtx.lineTo(x, y);
+  }
+  ekgCtx.strokeStyle = '#1D9E75';
+  ekgCtx.lineWidth = 1.5;
+  ekgCtx.stroke();
+}
+
+drawDial(0);
+drawEkg();
+
+targetSlider.addEventListener('input', () => {
+  tgtOut.textContent = parseFloat(targetSlider.value).toFixed(1);
+  if (taps.length >= MIN_TAPS) updateDisplay();
+  updateTargetLine();
+});
+sensSlider.addEventListener('input', () => { sensOut.textContent = sensSlider.value; });
+
+function updateTargetLine() {
+  const t = parseFloat(targetSlider.value);
+  bpmChart.data.datasets[1].data = bpmLabels.map(() => t);
+  bpmChart.update('none');
+}
+
+async function toggleListen() {
+  if (listening) { stopListen(); return; }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      video: false
+    });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    source = audioCtx.createMediaStreamSource(stream);
+    source.connect(analyser);
+    listening = true;
+    listenBtn.textContent = 'Stop listening';
+    listenBtn.classList.add('active');
+    statusEl.className = 'status-bar s-listening';
+    statusEl.textContent = 'Listening — hold phone near the clock';
+    loop();
+  } catch(e) {
+    statusEl.className = 'status-bar s-idle';
+    statusEl.textContent = 'Microphone access denied — check browser permissions';
+  }
+}
+
+function stopListen() {
+  listening = false;
+  cancelAnimationFrame(animFrame);
+  if (source) source.disconnect();
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (audioCtx) audioCtx.close();
+  listenBtn.textContent = 'Start listening';
+  listenBtn.classList.remove('active');
+  if (taps.length < MIN_TAPS) {
+    statusEl.className = 'status-bar s-idle';
+    statusEl.textContent = 'Press start to begin';
+  }
+}
+
+function loop() {
+  if (!listening) return;
+  animFrame = requestAnimationFrame(loop);
+  const tdBuf = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteTimeDomainData(tdBuf);
+
+  let sum = 0;
+  for (let i = 0; i < tdBuf.length; i++) { const v = (tdBuf[i] - 128) / 128; sum += v * v; }
+  const rms = Math.sqrt(sum / tdBuf.length);
+
+  const samplesPerFrame = Math.max(1, Math.floor(ekgBuf.length / 60));
+  for (let s = 0; s < samplesPerFrame; s++) {
+    ekgBuf[ekgWritePos] = (tdBuf[Math.floor(s * tdBuf.length / samplesPerFrame)] - 128) / 128;
+    ekgWritePos = (ekgWritePos + 1) % ekgBuf.length;
+  }
+  const display = new Float32Array(ekgBuf.length);
+  for (let i = 0; i < ekgBuf.length; i++) display[i] = ekgBuf[(ekgWritePos + i) % ekgBuf.length];
+  ekgBuf = display; ekgWritePos = 0;
+  drawEkg();
+
+  const threshold = parseFloat(sensSlider.value) / 1000;
+  const now = performance.now();
+  if (rms > threshold && prevRms <= threshold && (now - lastTickTime) > 200) {
+    lastTickTime = now;
+    onTick(now);
+  }
+  prevRms = rms;
+}
+
+function onTick(now) {
+  taps.push(now);
+  if (taps.length > MAX_TAPS) taps.shift();
+  if (taps.length >= MIN_TAPS) updateDisplay();
+  else {
+    statusEl.className = 'status-bar s-listening';
+    statusEl.textContent = 'Detected ' + taps.length + ' ticks… (' + MIN_TAPS + ' needed)';
+  }
+}
+
+function updateDisplay() {
+  const intervals = [];
+  for (let i = 1; i < taps.length; i++) intervals.push(taps[i] - taps[i-1]);
+  const avg = intervals.reduce((a,b) => a+b,0) / intervals.length;
+  const bpm = 60000 / avg;
+  const target = parseFloat(targetSlider.value);
+  const diff = bpm - target;
+
+  bpmEl.textContent = bpm.toFixed(1);
+  devLbl.textContent = (diff >= 0 ? '+' : '') + diff.toFixed(1) + ' BPM';
+  drawDial(diff);
+
+  const absDiff = Math.abs(diff);
+  let cls, msg, tip;
+  if (absDiff < 0.5) {
+    cls = 's-good'; msg = 'Right on time — no adjustment needed'; tip = '';
+  } else if (diff > 0) {
+    cls = 's-fast'; msg = 'Running fast by ' + diff.toFixed(1) + ' BPM';
+    tip = 'Lower the bob slightly. Gaining ~' + Math.round((diff/target)*86400) + ' sec/day.';
+  } else {
+    cls = 's-slow'; msg = 'Running slow by ' + Math.abs(diff).toFixed(1) + ' BPM';
+    tip = 'Raise the bob slightly. Losing ~' + Math.round((Math.abs(diff)/target)*86400) + ' sec/day.';
+  }
+  statusEl.className = 'status-bar ' + cls;
+  statusEl.textContent = msg;
+  adviceEl.textContent = tip;
+
+  const dot = document.createElement('div');
+  dot.className = 'dot ' + (absDiff < 0.5 ? 'good' : diff > 0 ? 'fast' : 'slow');
+  dotsEl.appendChild(dot);
+  while (dotsEl.children.length > 12) dotsEl.removeChild(dotsEl.firstChild);
+
+  const now = new Date();
+  const lbl = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0') + ':' + now.getSeconds().toString().padStart(2,'0');
+  bpmHistory.push(parseFloat(bpm.toFixed(2)));
+  bpmLabels.push(lbl);
+  if (bpmHistory.length > 40) { bpmHistory.shift(); bpmLabels.shift(); }
+  bpmChart.data.datasets[1].data = bpmLabels.map(() => target);
+  bpmChart.update('none');
+}
+
+function resetAll() {
+  taps = []; bpmHistory.length = 0; bpmLabels.length = 0; lastTickTime = 0;
+  bpmEl.textContent = '—'; devLbl.textContent = '—'; adviceEl.textContent = '';
+  dotsEl.innerHTML = '';
+  drawDial(0);
+  bpmChart.update('none');
+  statusEl.className = 'status-bar ' + (listening ? 's-listening' : 's-idle');
+  statusEl.textContent = listening ? 'Listening — hold phone near the clock' : 'Press start to begin';
+}
+</script>
+</body>
+</html>
