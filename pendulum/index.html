@@ -107,7 +107,7 @@
 let audioCtx, analyser, source, stream, animFrame;
 let listening = false;
 let taps = [], bpmHistory = [], bpmLabels = [];
-let lastTickTime = 0, prevRms = 0;
+let lastTickTime = 0, avgRms = 0;
 const MIN_TAPS = 4, MAX_TAPS = 24;
 
 const ekgCanvas = document.getElementById('ekg');
@@ -306,13 +306,13 @@ function loop() {
 
   const sensVal = parseFloat(sensSlider.value);
   const threshold = (101 - sensVal) / 2000;
-  const spikeRatio = sensVal > 50 ? 1.5 : 2.5;
   const now = performance.now();
-  if (rms > threshold && rms > prevRms * spikeRatio && (now - lastTickTime) > 150) {
+  const minGap = 400;
+  if (rms > threshold && rms > avgRms * 3.0 && (now - lastTickTime) > minGap) {
     lastTickTime = now;
     onTick(now);
   }
-  prevRms = rms * 0.85 + prevRms * 0.15;
+  avgRms = avgRms * 0.95 + rms * 0.05;
 }
 
 function onTick(now) {
@@ -367,7 +367,7 @@ function updateDisplay() {
 }
 
 function resetAll() {
-  taps = []; bpmHistory.length = 0; bpmLabels.length = 0; lastTickTime = 0;
+  taps = []; bpmHistory.length = 0; bpmLabels.length = 0; lastTickTime = 0; avgRms = 0;
   bpmEl.textContent = '—'; devLbl.textContent = '—'; adviceEl.textContent = '';
   dotsEl.innerHTML = '';
   drawDial(0);
