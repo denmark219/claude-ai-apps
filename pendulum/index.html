@@ -75,9 +75,9 @@
     <span id="sens-out">15</span>
   </div>
   <div class="row">
-    <label for="mingap">Min gap (ms)</label>
-    <input type="range" id="mingap" min="100" max="800" step="10" value="300">
-    <span id="mingap-out">300</span>
+    <label for="mingap">Min gap (ms) ≥500</label>
+    <input type="range" id="mingap" min="500" max="1200" step="50" value="500">
+    <span id="mingap-out">500</span>
   </div>
   <div class="row" style="gap:12px;">
     <label style="font-size:13px;color:var(--text2);min-width:90px;">Count mode</label>
@@ -253,7 +253,7 @@ function drawEkg() {
   const src = freqBuf.length > 0 ? freqBuf : null;
   for (let i = 0; i < (src ? src.length : ekgBuf.length); i++) {
     const x = i * step;
-    const v = src ? (src[i] - 128) / 128 : ekgBuf[i];
+    const v = (src ? (src[i] - 128) / 128 : ekgBuf[i]) * 4.5;
     const y = H / 2 - v * (H / 2 - 4);
     i === 0 ? ekgCtx.moveTo(x, y) : ekgCtx.lineTo(x, y);
   }
@@ -338,13 +338,18 @@ function loop() {
   drawEkg();
 
   const sensVal = parseFloat(sensSlider.value);
-  const minGap = parseFloat(mingapSlider.value);
+  // Hard 500ms floor prevents tick+tock double-counting at 60 BPM (120 BPM max).
+  // User's min-gap slider can raise it further (e.g. 900ms to only catch one sound per cycle).
+  const minGap = Math.max(500, parseFloat(mingapSlider.value));
   const now = performance.now();
 
-  peakRms = Math.max(peakRms * 0.998, rms);
-  avgRms = avgRms * 0.97 + rms * 0.03;
+  // Simple EMA of RMS — fast attack, no peakRms needed.
+  avgRms = avgRms * 0.95 + rms * 0.05;
 
-  const dynamicThreshold = avgRms + (peakRms - avgRms) * (0.9 - sensVal / 120);
+  // Threshold = avgRms * multiplier. Sensitivity 1→100 maps multiplier 6.0→1.3.
+  // Higher sensitivity slider value → lower multiplier → fires more easily.
+  const multiplier = 6.0 - (sensVal / 100) * 4.7;
+  const dynamicThreshold = avgRms * multiplier;
 
   if (rms > dynamicThreshold && (now - lastTickTime) > minGap) {
     lastTickTime = now;
@@ -417,7 +422,7 @@ function updateDisplay() {
 }
 
 function resetAll() {
-  taps = []; bpmHistory.length = 0; bpmLabels.length = 0; lastTickTime = 0; avgRms = 0; peakRms = 0; tickCount = 0;
+  taps = []; bpmHistory.length = 0; bpmLabels.length = 0; lastTickTime = 0; avgRms = 0; tickCount = 0;
   document.getElementById('tick-counter').textContent = '0';
   document.getElementById('raw-interval').textContent = '—';
   document.getElementById('raw-bpm').textContent = '—';
