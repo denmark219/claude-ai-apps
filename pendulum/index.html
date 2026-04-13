@@ -74,6 +74,15 @@
     <input type="range" id="sens" min="1" max="100" step="1" value="15">
     <span id="sens-out">15</span>
   </div>
+  <div class="row">
+    <label for="mingap">Min gap (ms)</label>
+    <input type="range" id="mingap" min="100" max="800" step="10" value="300">
+    <span id="mingap-out">300</span>
+  </div>
+  <div class="row" style="gap:12px;">
+    <label style="font-size:13px;color:var(--text2);min-width:90px;">Count mode</label>
+    <button id="modeBtn" onclick="toggleMode()" style="flex:1;padding:0.4rem 0.75rem;font-size:13px;background:var(--bg);border:0.5px solid var(--border2);border-radius:var(--radius);color:var(--text);cursor:pointer;">Every tick</button>
+  </div>
 
   <button class="big-btn" id="listenBtn" onclick="toggleListen()">Start listening</button>
   <div id="status" class="status-bar s-idle">Press start to begin</div>
@@ -94,6 +103,15 @@
     </div>
   </div>
 
+  <div style="background:var(--bg2);border-radius:var(--radius);padding:0.6rem 0.75rem;margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between;">
+    <span style="font-size:11px;color:var(--text2);">Ticks detected</span>
+    <span style="font-size:13px;font-weight:500;color:var(--text);" id="tick-counter">0</span>
+    <span style="font-size:11px;color:var(--text2);">Raw interval</span>
+    <span style="font-size:13px;font-weight:500;color:var(--text);" id="raw-interval">—</span>
+    <span style="font-size:11px;color:var(--text2);">= BPM</span>
+    <span style="font-size:13px;font-weight:500;color:var(--text);" id="raw-bpm">—</span>
+  </div>
+
   <p class="section-label">BPM history</p>
   <div class="chart-wrap">
     <canvas id="bpmChart" aria-label="BPM history line chart"></canvas>
@@ -107,7 +125,22 @@
 let audioCtx, analyser, source, stream, animFrame;
 let listening = false;
 let taps = [], bpmHistory = [], bpmLabels = [];
-let lastTickTime = 0, avgRms = 0;
+let lastTickTime = 0, avgRms = 0, peakRms = 0;
+let tickTockMode = false;
+let tickCount = 0;
+
+const mingapSlider = document.getElementById('mingap');
+const mingapOut = document.getElementById('mingap-out');
+const modeBtn = document.getElementById('modeBtn');
+mingapSlider.addEventListener('input', () => { mingapOut.textContent = mingapSlider.value; });
+
+function toggleMode() {
+  tickTockMode = !tickTockMode;
+  modeBtn.textContent = tickTockMode ? 'Every other (tick-tock)' : 'Every tick';
+  modeBtn.style.borderColor = tickTockMode ? '#1D9E75' : '';
+  modeBtn.style.color = tickTockMode ? '#1D9E75' : '';
+  resetAll();
+}
 const MIN_TAPS = 4, MAX_TAPS = 24;
 
 const ekgCanvas = document.getElementById('ekg');
@@ -305,19 +338,36 @@ function loop() {
   drawEkg();
 
   const sensVal = parseFloat(sensSlider.value);
-  const threshold = (101 - sensVal) / 2000;
+  const minGap = parseFloat(mingapSlider.value);
   const now = performance.now();
-  const minGap = 400;
-  if (rms > threshold && rms > avgRms * 3.0 && (now - lastTickTime) > minGap) {
+
+  peakRms = Math.max(peakRms * 0.998, rms);
+  avgRms = avgRms * 0.97 + rms * 0.03;
+
+  const dynamicThreshold = avgRms + (peakRms - avgRms) * (0.9 - sensVal / 120);
+
+  if (rms > dynamicThreshold && (now - lastTickTime) > minGap) {
     lastTickTime = now;
-    onTick(now);
+    tickCount++;
+    if (!tickTockMode || tickCount % 2 === 1) {
+      onTick(now);
+    }
   }
-  avgRms = avgRms * 0.95 + rms * 0.05;
 }
 
 function onTick(now) {
   taps.push(now);
   if (taps.length > MAX_TAPS) taps.shift();
+
+  document.getElementById('tick-counter').textContent = tickCount;
+
+  if (taps.length >= 2) {
+    const lastInterval = taps[taps.length-1] - taps[taps.length-2];
+    const rawBpm = 60000 / lastInterval;
+    document.getElementById('raw-interval').textContent = lastInterval.toFixed(0) + 'ms';
+    document.getElementById('raw-bpm').textContent = rawBpm.toFixed(1);
+  }
+
   if (taps.length >= MIN_TAPS) updateDisplay();
   else {
     statusEl.className = 'status-bar s-listening';
@@ -367,7 +417,10 @@ function updateDisplay() {
 }
 
 function resetAll() {
-  taps = []; bpmHistory.length = 0; bpmLabels.length = 0; lastTickTime = 0; avgRms = 0;
+  taps = []; bpmHistory.length = 0; bpmLabels.length = 0; lastTickTime = 0; avgRms = 0; peakRms = 0; tickCount = 0;
+  document.getElementById('tick-counter').textContent = '0';
+  document.getElementById('raw-interval').textContent = '—';
+  document.getElementById('raw-bpm').textContent = '—';
   bpmEl.textContent = '—'; devLbl.textContent = '—'; adviceEl.textContent = '';
   dotsEl.innerHTML = '';
   drawDial(0);
