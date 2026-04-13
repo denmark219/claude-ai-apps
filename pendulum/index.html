@@ -199,20 +199,29 @@ function drawDial(deviation) {
 
 function drawEkg() {
   const W = ekgCanvas.offsetWidth || 400;
-  ekgCanvas.width = W * window.devicePixelRatio;
-  ekgCanvas.height = 64 * window.devicePixelRatio;
-  ekgCanvas.style.width = W + 'px';
-  ekgCanvas.style.height = '64px';
-  ekgCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  const dpr = window.devicePixelRatio || 1;
+  if (ekgCanvas.width !== W * dpr) {
+    ekgCanvas.width = W * dpr;
+    ekgCanvas.height = 64 * dpr;
+    ekgCanvas.style.width = W + 'px';
+    ekgCanvas.style.height = '64px';
+  }
+  ekgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const H = 64;
   ekgCtx.clearRect(0, 0, W, H);
   ekgCtx.fillStyle = isDark() ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)';
   ekgCtx.fillRect(0, 0, W, H);
+
+  const freqBuf = new Uint8Array(analyser ? analyser.frequencyBinCount : 0);
+  if (analyser) analyser.getByteTimeDomainData(freqBuf);
+
   ekgCtx.beginPath();
-  const step = W / ekgBuf.length;
-  for (let i = 0; i < ekgBuf.length; i++) {
+  const step = W / (freqBuf.length || ekgBuf.length);
+  const src = freqBuf.length > 0 ? freqBuf : null;
+  for (let i = 0; i < (src ? src.length : ekgBuf.length); i++) {
     const x = i * step;
-    const y = H / 2 - ekgBuf[i] * (H / 2 - 4);
+    const v = src ? (src[i] - 128) / 128 : ekgBuf[i];
+    const y = H / 2 - v * (H / 2 - 4);
     i === 0 ? ekgCtx.moveTo(x, y) : ekgCtx.lineTo(x, y);
   }
   ekgCtx.strokeStyle = '#1D9E75';
@@ -245,7 +254,8 @@ async function toggleListen() {
     });
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 512;
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.3;
     source = audioCtx.createMediaStreamSource(stream);
     source.connect(analyser);
     listening = true;
